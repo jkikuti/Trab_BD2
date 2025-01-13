@@ -1,0 +1,70 @@
+Criação do Banco de Dados no Oracle
+A seguir apresento o script adaptado para Oracle Database, com as instruções para criação dos objetos (tabelas e constraints) referentes ao modelo de dados do sistema. No Oracle, algumas diferenças em relação ao PostgreSQL incluem:
+
+SERIAL, utiliza-se sequências ou colunas com GENERATED [ALWAYS|BY DEFAULT] AS IDENTITY.
+VARCHAR são substituídos por VARCHAR2.
+TEXT são substituídos por CLOB.
+DECIMAL(p,s) são substituídos por NUMBER(p,s)
+A cláusula de coluna computada (no PostgreSQL GENERATED ALWAYS AS (...) STORED) em Oracle é feita via GENERATED ALWAYS AS (...) VIRTUAL (ou VIRTUAL | STORED a partir de versões mais recentes do Oracle).
+
+O Oracle não tem a instrução CREATE SCHEMA IF NOT EXISTS como no PostgreSQL. Em geral, cria-se um usuário (schema) e então os objetos são criados neste usuário.
+Resumo da Lógica do Procedimento
+
+Inicialização do gerador de números aleatórios
+Utiliza-se o pacote DBMS_RANDOM para gerar valores pseudo aleatórios (strings e números), chamando DBMS_RANDOM.INITIALIZE.
+
+Inserção de dados em cada tabela
+Tabela estado: Insere siglas aleatórias (2 letras maiusculas) para cada “Estado”, em quantidade = 5 * p_escala.
+Tabela cliente: Gera nomes aleatórios (5 a 10 letras), CPFs (11 dígitos) e emails (montados a partir de um prefixo e algum domínio), em quantidade = 10 * p_escala.
+Tabela fabricante: Insere fabricantes fictícios (3 * p_escala).
+Tabela action_figure: Gera personagens, universos e preços aleatórios, referenciando um fabricante escolhido por sorteio, em quantidade = 8 * p_escala.
+Tabela pedido: Insere registros de pedidos com data e cliente associados, em quantidade = 5 * p_escala.
+Inserção de itens em pedidos (pedido_tem_action_figure)
+Para cada pedido, sorteiam-se de 2 a 5 action figures.
+Utiliza-se um array associativo para garantir que não se insira o mesmo action_figure duas vezes para o mesmo pedido, evitando violar a PK (id_pedido, id_action_figure).
+
+Atualização do valor total do pedido
+Após inserir os itens, faz-se um UPDATE em pedido para somar o subtotal de cada item (subtotal = pedido_quantidade * valor_unitario), armazenando o resultado em valor_total.
+Confirmação da Transação
+Ao final, realiza-se um COMMIT para persistir as inserções.
+Caso haja qualquer erro, ele é capturado no EXCEPTION e provoca um ROLLBACK total das mudanças.
+
+Visão Computada (View)
+Exemplo: Criaremos uma view que exibe, para cada pedido, o cliente, data do pedido e valor total, juntamente com a quantidade total de itens solicitados naquele pedido.
+Juntamos pedido com cliente para obter o nome do cliente.
+Calculamos a soma das quantidades de itens de cada pedido, exibindo isso em total_itens.
+Se atualizarmos, por exemplo, o valor_total de um pedido ou incluirmos/removermos itens na tabela pedido_tem_action_figure, a view refletirá instantaneamente as alterações.
+
+Visão Materializada (Materialized View)
+Exemplo: Criar uma materialized view para otimizar consultas frequentes sobre a somatória do valor_total dos pedidos por dia. Assim, ao invés de recalcular sempre, teremos esse resultado pré-armazenado.
+Agrupa os pedidos por dia (TRUNC(data_pedido)).
+Armazena o número de pedidos (COUNT(*)) e a soma de valor_total naquele dia.
+Qualquer alteração em pedido não afetará automaticamente a MV até chamarmos o REFRESH. Depois do refresh, a MV estará sincronizada.
+
+CTE (Common Table Expressions)
+
+Consulta não recursiva com WITH
+CTE fabricantes_populares: agrupa o número de action figures por fabricante e filtra somente aqueles com mais de 3 action figures.
+Consulta principal: busca, entre todos os action figures, somente os que pertencem aos fabricantes encontrados na CTE.
+
+
+Consulta Recursiva usando with
+CTE Inicial (Nível 0)
+Selecionamos todos os ESTADO como “raiz” da nossa “hierarquia”, usando entity = 'ESTADO'.
+parent_id fica NULL pois não existe nível acima do Estado
+Recursão 1 (Cidades)
+Unimos (via UNION ALL) com o SELECT que pega, para cada linha “raiz” que for ESTADO, todas as cidades (cidade) que têm id_estado = lh.id.
+Passamos lh.entity = 'ESTADO' para só expandir a partir das linhas “estado”.
+Recursão 2 (Bairros)
+Para cada linha anterior que for CIDADE, buscamos os bairro onde b.id_cidade = lh.id.
+Recursão 2 (Logradouros)
+Para cada CIDADE, podemos listar logradouro.
+Mesmo nível de recursão, mas numa “ramificação” alternativa.
+
+Resultado
+A CTE gera uma tabela “verticalizada”, com colunas:
+id (chave do elemento atual, seja estado/cidade/bairro/logradouro),
+entity (qual é o tipo: 'ESTADO', 'CIDADE', 'BAIRRO', 'LOGRADOURO'),
+nome_local (se for estado, a sigla; se for cidade/bairro/logradouro, o nome),
+parent_id (quem é o “pai” no nível anterior).
+
